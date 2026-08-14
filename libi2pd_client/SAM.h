@@ -81,6 +81,7 @@ namespace client
 	const char SAM_PARAM_CRYPTO_TYPE[] = "CRYPTO_TYPE";
 	const char SAM_PARAM_SIZE[] = "SIZE";
 	const char SAM_PARAM_HOST[] = "HOST";
+	const char SAM_PARAM_LISTEN_PORT[] = "LISTEN_PORT";
 	const char SAM_PARAM_PORT[] = "PORT";
 	const char SAM_PARAM_FROM_PORT[] = "FROM_PORT";
 	const char SAM_PARAM_TO_PORT[] = "TO_PORT";
@@ -149,9 +150,11 @@ namespace client
 			void HandleI2PAccept (std::shared_ptr<i2p::stream::Stream> stream);
 			void HandleI2PForward (std::shared_ptr<i2p::stream::Stream> stream, boost::asio::ip::tcp::endpoint ep);
 			void HandleWriteI2PData (const boost::system::error_code& ecode, size_t sz);
-			void HandleI2PDatagramReceive (const i2p::data::IdentityEx& from, uint16_t fromPort, uint16_t toPort,
-				const uint8_t * buf, size_t len, const i2p::util::Mapping * options);
-			void HandleI2PRawDatagramReceive (uint16_t fromPort, uint16_t toPort, const uint8_t * buf, size_t len);
+			// sessionID is the session the datagram belongs to, a subsession has its own
+			void HandleI2PDatagramReceive (std::string sessionID, const i2p::data::IdentityEx& from,
+				uint16_t fromPort, uint16_t toPort, const uint8_t * buf, size_t len, const i2p::util::Mapping * options);
+			void HandleI2PRawDatagramReceive (std::string sessionID, uint16_t fromPort, uint16_t toPort,
+				const uint8_t * buf, size_t len);
 
 			void ProcessSessionCreate (std::string_view buf);
 			void ProcessStreamConnect (char * buf, size_t len, size_t rem);

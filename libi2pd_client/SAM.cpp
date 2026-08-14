@@ -463,13 +463,13 @@ namespace client
 					if (res.ec != std::errc()) port = 0;
 				}
 				if (type == SAMSessionType::eSAMSessionTypeDatagram)
-					dest->SetReceiver (std::bind (&SAMSocket::HandleI2PDatagramReceive, shared_from_this (),
+					dest->SetReceiver (std::bind (&SAMSocket::HandleI2PDatagramReceive, shared_from_this (), m_ID,
 						std::placeholders::_1, std::placeholders::_2, std::placeholders::_3,
 					    std::placeholders::_4, std::placeholders::_5, std::placeholders::_6),
 						port
 					);
 				else // raw
-					dest->SetRawReceiver (std::bind (&SAMSocket::HandleI2PRawDatagramReceive, shared_from_this (),
+					dest->SetRawReceiver (std::bind (&SAMSocket::HandleI2PRawDatagramReceive, shared_from_this (), m_ID,
 						std::placeholders::_1, std::placeholders::_2, std::placeholders::_3, std::placeholders::_4),
 						port
 					);
@@ -886,20 +886,81 @@ namespace client
 			}
 			std::string_view style = params[SAM_PARAM_STYLE];
 			SAMSessionType type = SAMSessionType::eSAMSessionTypeUnknown;
+			i2p::datagram::DatagramVersion datagramVersion = i2p::datagram::eDatagramV1;
 			if (style == SAM_VALUE_STREAM) type = SAMSessionType::eSAMSessionTypeStream;
-			// TODO: implement other styles
+#if __cplusplus >= 202002L // C++20
+			else if (style.starts_with (SAM_VALUE_DATAGRAM))
+#else
+			else if (style.substr (0, SAM_VALUE_DATAGRAM.size ()) == SAM_VALUE_DATAGRAM)
+#endif
+			{
+				// DATAGRAM, DATAGRAM1, DATAGRAM2, DATAGRAM3
+				type = SAMSessionType::eSAMSessionTypeDatagram;
+				if (style.size () > SAM_VALUE_DATAGRAM.size ())
+				{
+					switch (style[SAM_VALUE_DATAGRAM.size ()])
+					{
+						case '1': datagramVersion = i2p::datagram::eDatagramV1; break;
+						case '2': datagramVersion = i2p::datagram::eDatagramV2; break;
+						case '3': datagramVersion = i2p::datagram::eDatagramV3; break;
+						default: type = SAMSessionType::eSAMSessionTypeUnknown;
+					}
+				}
+			}
+			else if (style == SAM_VALUE_RAW) type = SAMSessionType::eSAMSessionTypeRaw;
 			if (type == SAMSessionType::eSAMSessionTypeUnknown)
 			{
 				// unknown style
 				SendSessionI2PError("Unsupported STYLE");
 				return;
 			}
+
+			std::shared_ptr<boost::asio::ip::udp::endpoint> forward = nullptr;
+			if ((type == SAMSessionType::eSAMSessionTypeDatagram || type == SAMSessionType::eSAMSessionTypeRaw) &&
+				params.Contains (SAM_PARAM_HOST) && params.Contains (SAM_PARAM_PORT))
+			{
+				// udp forward selected
+				boost::system::error_code e;
+				auto addr = boost::asio::ip::make_address (params[SAM_PARAM_HOST], e);
+				if (e)
+				{
+					SendSessionI2PError("Invalid IP Address in HOST");
+					return;
+				}
+				uint16_t port = 0;
+				if (!params.Get (SAM_PARAM_PORT, port))
+				{
+					SendSessionI2PError("Invalid port");
+					return;
+				}
+				forward = std::make_shared<boost::asio::ip::udp::endpoint>(addr, port);
+			}
+
 			uint16_t fromPort = 0;
 			params.Get (SAM_PARAM_FROM_PORT, fromPort);
+			// traffic from I2P is routed by port, LISTEN_PORT defaults to FROM_PORT
+			uint16_t listenPort = fromPort;
+			params.Get (SAM_PARAM_LISTEN_PORT, listenPort);
 
 			auto subsession = std::make_shared<SAMSubSession>(masterSession, id, type, fromPort);
 			if (m_Owner.AddSession (subsession))
 			{
+				if (type == SAMSessionType::eSAMSessionTypeDatagram || type == SAMSessionType::eSAMSessionTypeRaw)
+				{
+					subsession->DatagramVersion = datagramVersion;
+					subsession->UDPEndpoint = forward;
+					auto dest = masterSession->GetLocalDestination ()->CreateDatagramDestination (true, datagramVersion);
+					if (type == SAMSessionType::eSAMSessionTypeDatagram)
+						dest->SetReceiver (std::bind (&SAMSocket::HandleI2PDatagramReceive, shared_from_this (), std::string (id),
+							std::placeholders::_1, std::placeholders::_2, std::placeholders::_3,
+							std::placeholders::_4, std::placeholders::_5, std::placeholders::_6),
+							listenPort);
+					else
+						dest->SetRawReceiver (std::bind (&SAMSocket::HandleI2PRawDatagramReceive, shared_from_this (), std::string (id),
+							std::placeholders::_1, std::placeholders::_2, std::placeholders::_3,
+							std::placeholders::_4),
+							listenPort);
+				}
 				masterSession->subsessions.insert (std::string (id));
 				SendSessionCreateReplyOk ();
 			}
@@ -1264,11 +1325,11 @@ namespace client
 			LogPrint (eLogWarning, "SAM: I2P forward acceptor has been reset");
 	}
 
-	void SAMSocket::HandleI2PDatagramReceive (const i2p::data::IdentityEx& from, uint16_t fromPort, uint16_t toPort,
-		const uint8_t * buf, size_t len, const i2p::util::Mapping * options)
+	void SAMSocket::HandleI2PDatagramReceive (std::string sessionID, const i2p::data::IdentityEx& from,
+		uint16_t fromPort, uint16_t toPort, const uint8_t * buf, size_t len, const i2p::util::Mapping * options)
 	{
 		LogPrint (eLogDebug, "SAM: Datagram received ", len);
-		auto session = m_Owner.FindSession(m_ID);
+		auto session = m_Owner.FindSession(sessionID);
 		if(session)
 		{
 			auto base64 = (session->DatagramVersion == i2p::datagram::eDatagramV3) ? from.GetIdentHash ().ToBase64 () : from.ToBase64 ();
@@ -1316,10 +1377,11 @@ namespace client
 		}
 	}
 
-	void SAMSocket::HandleI2PRawDatagramReceive (uint16_t fromPort, uint16_t toPort, const uint8_t * buf, size_t len)
+	void SAMSocket::HandleI2PRawDatagramReceive (std::string sessionID, uint16_t fromPort, uint16_t toPort,
+		const uint8_t * buf, size_t len)
 	{
 		LogPrint (eLogDebug, "SAM: Raw datagram received ", len);
-		auto session = m_Owner.FindSession(m_ID);
+		auto session = m_Owner.FindSession(sessionID);
 		if(session)
 		{
 			auto ep = session->UDPEndpoint;
