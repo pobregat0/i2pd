@@ -501,6 +501,7 @@ namespace data
 	{
 		size_t offset = 0;
 		// properties
+		if (offset + 2 > len) return 0;
 		uint16_t propertiesLen = bufbe16toh (buf + offset); offset += 2;
 		offset += propertiesLen; // skip for now. TODO: implement properties
 		// entries
