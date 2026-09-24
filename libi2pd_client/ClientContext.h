@@ -17,7 +17,7 @@
 #include <memory>
 #include <string_view>
 #include <boost/asio.hpp>
-#include <boost/property_tree/ptree_fwd.hpp>
+#include <boost/property_tree/ptree.hpp>
 #include "Destination.h"
 #include "I2PService.h"
 #include "I2PTunnel.h"
