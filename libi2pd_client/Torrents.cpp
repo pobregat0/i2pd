@@ -2350,7 +2350,7 @@ namespace torrents
 					boost::asio::post (GetTorrentsTunnel ()->GetDiskIOService (),
 					[requestBlock = RequestedBlock{index, offset, length}, torrent = m_Torrent, s = shared_from_this ()]() mutable
 					{
-						bool loaded = true;
+						bool loaded = true, diskReadFailed = false;
 						auto [index, offset, len] = requestBlock;
 						Piece& piece = torrent->GetPiece (index);
 						piece.SetIsSending (true);
@@ -2362,6 +2362,7 @@ namespace torrents
 								if (!piece.Load (std::move (it)))
 									loaded = false;
 							}
+							if (!loaded) diskReadFailed = true; // a Load() failure is a disk read error; the hash mismatch below is not
 							if (loaded && !piece.VerifyHash ())
 							{
 								LogPrint (eLogError, "Torrents: Corrupted piece ", index);
@@ -2369,6 +2370,7 @@ namespace torrents
 							}
 						}
 						piece.SetIsSending (false);
+						if (loaded) torrent->ResetNumFailedDiskOps (); // disk read succeeded, reset the failure counter
 						if (loaded)
 							boost::asio::post (s->GetTorrentsTunnel ()->GetService (),
 								[requestedBlock = std::move (requestBlock), s]()
@@ -2383,6 +2385,13 @@ namespace torrents
 						{
 							LogPrint (eLogError, "Torrents: Failed to load piece ", index);
 							piece.Reset ();
+							if (diskReadFailed && torrent->IncNumFailedDiskOps () >= MAX_NUM_FAILED_DISK_OPS)
+							{
+								LogPrint (eLogError, "Torrents: ", MAX_NUM_FAILED_DISK_OPS,
+									" disk failures in a row, stopping ", torrent->GetName ());
+								torrent->SetError (eTorrentErrorFilesystemError);
+								s->GetTorrentsTunnel ()->StopTorrent (torrent);
+							}
 							if (s->m_IsFast)
 								boost::asio::post (s->GetTorrentsTunnel ()->GetService (),
 								[requestedBlock = std::move (requestBlock), s]()
