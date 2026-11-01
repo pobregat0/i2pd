@@ -2149,7 +2149,8 @@ namespace torrents
 				if (piece.VerifyHash ())
 				{
 					boost::asio::post (GetTorrentsTunnel ()->GetDiskIOService (),
-						[index, t = std::weak_ptr<Torrent> (m_Torrent)]() mutable
+						[index, t = std::weak_ptr<Torrent> (m_Torrent),
+						 tn = std::weak_ptr<TorrentsTunnel> (GetTorrentsTunnel ())]() mutable
 						{
 							auto torrent = t.lock ();
 							if (!torrent) return; // torrent doesn't exist anymore
@@ -2162,10 +2163,21 @@ namespace torrents
 									saved = false;
 									break;
 								}
-							if (!saved)
+							if (saved)
+								torrent->ResetNumFailedDiskOps ();
+							else
 							{
 								LogPrint (eLogWarning, "Torrents: Failed to save piece");
 								piece.InvalidateAllBlocks ();
+								// a disk that keeps refusing writes is not worth retrying forever
+								if (torrent->IncNumFailedDiskOps () >= MAX_NUM_FAILED_DISK_OPS)
+								{
+									LogPrint (eLogError, "Torrents: ", MAX_NUM_FAILED_DISK_OPS,
+										" disk failures in a row, stopping ", torrent->GetName ());
+									torrent->SetError (eTorrentErrorFilesystemError);
+									auto tunnel = tn.lock ();
+									if (tunnel) tunnel->StopTorrent (torrent);
+								}
 							}
 							torrent->UpdateTorrentResumeFile ();
 						});

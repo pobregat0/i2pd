@@ -80,6 +80,7 @@ namespace torrents
 	constexpr size_t MAX_NUM_REQUESTS = 24;
 	constexpr size_t MAX_NUM_PIECES = 6;
 	constexpr size_t MAX_INCOMING_REQUESTS_QUEUE_SIZE = 32;
+	constexpr int MAX_NUM_FAILED_DISK_OPS = 3; // stop a torrent after this many disk read/write failures in a row
 	constexpr int PIECE_INACTIVITY_TIMEOUT = 22; // in seconds
 	constexpr int HANDSHAKE_RECEIVE_TIMEOUT = 20; // in seconds
 	constexpr int BANDWIDTH_RATE_SAMPLING_INTERVAL = 1500; // in milliseconds
@@ -314,6 +315,8 @@ namespace torrents
 			TorrentError GetError () const { return m_Error; }
 			std::string_view GetErrorStr () const { return TorrentErrorStr[m_Error]; }
 			void SetError (TorrentError error) { m_Error = error; }
+			int IncNumFailedDiskOps () { return ++m_NumFailedDiskOps; } // disk read/write failures in a row
+			void ResetNumFailedDiskOps () { m_NumFailedDiskOps = 0; }
 			const std::filesystem::path& GetFullPath () const { return m_FullPath; }
 			void SetFullPath (const std::filesystem::path& fullPath) { m_FullPath = fullPath; }
 			const std::list<std::shared_ptr<TorrentFile> >& GetFiles () const { return m_Files; }
@@ -411,6 +414,7 @@ namespace torrents
 			uint64_t m_NextUpdateStatusTime, m_NextUpdateResumeFileTime, m_NextReconnectTime,
 				m_NextDHTUpdateTime, m_LastDHTAnnounceTime; // in monotonic seconds
 			TorrentError m_Error;
+			int m_NumFailedDiskOps = 0; // disk read/write failures in a row, resets on success
 	};
 
 	enum PeerConnectionOrigin

@@ -116,6 +116,7 @@ namespace torrents
 			bool RemoveTorrent (int id, bool deleteFiles);
 			void RemoveAllTorrents (bool deleteFiles);
 			bool StopTorrent (int id);
+			void StopTorrent (std::shared_ptr<Torrent> torrent); // by object, for internal callers
 			void StopAllTorrents ();
 			bool StartTorrent (int id);
 			void StartAllTorrents ();
@@ -145,7 +146,6 @@ namespace torrents
 			int FindTorrentID (std::shared_ptr<Torrent> torrent) const; // 0 if not found
 			bool CreateAndReserveFile (const std::filesystem::path& filePath, size_t reserve);
 			void CompleteTorrent (std::shared_ptr<Torrent> torrent);
-			void StopTorrent (std::shared_ptr<Torrent> torrent);
 			bool RequestTracker (size_t trackerID, std::shared_ptr<Torrent> torrent, TrackerAnnounceEvent event);
 			void RequestTorrentTrackers (std::shared_ptr<Torrent> torrent, TrackerAnnounceEvent event);
 			void TrackerRequestSent (const boost::beast::error_code& ecode, size_t bytes_transferred,
